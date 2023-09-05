@@ -16,10 +16,8 @@ const SocialLogin = () => {
             .then(result => {
                 const loggedInUser = result.user;
                 console.log(loggedInUser);
-                // navigate(from, { replace: true });
-
-                const saveUser = { name: loggedInUser.displayName, email: loggedInUser.email, photoURL: loggedInUser.photoURL, phoneNumber: loggedInUser?.phoneNumber, role: "user" }
-                fetch('http://localhost:5000/users', {
+                const saveUser = { name: loggedInUser.displayName, email: loggedInUser.email, photoURL: loggedInUser.photoURL, role: "user" }
+                fetch('https://event-management-server.vercel.app/users', {
                     method: 'POST',
                     headers: {
                         'content-type': 'application/json'

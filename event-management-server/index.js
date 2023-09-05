@@ -3,31 +3,17 @@ const app = express();
 const cors = require("cors");
 require("dotenv").config();
 const port = process.env.PORT || 5000;
+// const stripe = require("stripe")(process.env.PAYMENT_SECRET_KEY);
+
 
 // middleware
-app.use(cors());
-app.use(express.json());
-
-const verifyJWT = (req, res, next) => {
-  const authorization = req.headers.authorization;
-  if (!authorization) {
-    return res
-      .status(401)
-      .send({ error: true, message: "unauthorized access" });
-  }
-  // bearer token
-  const token = authorization.split(" ")[1];
-
-  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
-    if (err) {
-      return res
-        .status(401)
-        .send({ error: true, message: "unauthorized access" });
-    }
-    req.decoded = decoded;
-    next();
-  });
+const corsOptions = {
+  origin: "*",
+  credentials: true,
+  optionSuccessStatus: 200,
 };
+app.use(cors(corsOptions));
+app.use(express.json());
 
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.02w34e6.mongodb.net/?retryWrites=true&w=majority`;
@@ -44,28 +30,22 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server (optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
 
     const usersCollection = client.db("eventManagement").collection("users");
-    const productsCollection = client
-      .db("eventManagement")
-      .collection("products");
+    const productsCollection = client.db("eventManagement").collection("products");
+    const bookingsCollection = client.db("eventManagement").collection("bookings");
+    const paymentCollection = client.db("eventManagement").collection("payments");
 
-    app.post("/jwt", (req, res) => {
-      const user = req.body;
-      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
-        expiresIn: "1h",
-      });
+    //<<<<<<<<<-------------------------users----------------------------------->>>>>>>>
 
-      res.send({ token });
-    });
-
-    // user collection
+    // get all user
     app.get("/users", async (req, res) => {
       const result = await usersCollection.find().toArray();
       res.send(result);
     });
-    // Get user
+
+    // Get user by email
     app.get("/users/:email", async (req, res) => {
       const email = req.params.email;
       const query = { email: email };
@@ -74,7 +54,7 @@ async function run() {
       res.send(result);
     });
 
-    // Define the route to handle role updates for users
+    // role updates for users
     app.patch("/users/:id", async (req, res) => {
       try {
         const { id } = req.params;
@@ -104,6 +84,8 @@ async function run() {
       }
     });
 
+    // create a new user
+
     app.post("/users", async (req, res) => {
       const user = req.body;
       // console.log('User: ', user);
@@ -120,18 +102,13 @@ async function run() {
       res.send(result);
     });
 
-    //products
+    //<<<<<<-----------------------products------------------------------->>>>>>>>>>>>>>
 
-
-    // API endpoint for adding a new product
+    // adding a new product
     app.post("/products", async (req, res) => {
       try {
         const productData = req.body;
 
-        // // Set the status field to 'pending'
-        // productData.status = 'pending';
-
-        // Insert the product into the products collection
         const result = await productsCollection.insertOne(productData);
 
         res.status(201).json({ message: "Product created successfully" });
@@ -140,146 +117,203 @@ async function run() {
         res.status(500).json({ message: "Server error" });
       }
     });
-    // Product collection
 
+    // get all products
+    app.get("/products", async (req, res) => {
+      try {
+        const products = await productsCollection.find().toArray();
+        res.send(products);
+      } catch (error) {
+        console.error("Error retrieving products:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
 
-        // GET endpoint for retrieving products
-        app.get('/products', async (req, res) => {
-            try {
-                const products = await productsCollection.find().toArray();
-                res.send(products);
-            }
-            catch (error) {
-                console.error('Error retrieving products:', error)
-                res.status(500).json({ error: 'Internal server error' });
-            }
-        })
+    // GET  products by email
+    app.get("/products/organizer", async (req, res) => {
+      try {
+        const { email } = req.query;
 
+        console.log("Server Email: ", email);
+        const products = await productsCollection
+          .find({ email: email })
+          .toArray();
+        res.json(products);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
 
-        // GET endpoint for retrieving user products by email
-        app.get('/products/organizer', async (req, res) => {
-            try {
-                // console.log(req.body);
-                // console.log(req.query);
-                const { email } = req.query;
-                // const email = req.query.email;
+    //  update the products status
+    app.patch("/products/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { status } = req.body;
 
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({ error: "Invalid products ID" });
+        }
 
-                console.log("Server Email: ", email);
-                const products = await productsCollection.find({ email: email }).toArray();
-                res.json(products);
-            } catch (error) {
-                console.error(error);
-                res.status(500).json({ error: 'Internal server error' });
-            }
-        })
+        const updatedProducts = await productsCollection.findOneAndUpdate(
+          { _id: new ObjectId(id) },
+          { $set: { status } },
+          { returnOriginal: false }
+        );
 
-        // Implement the endpoint to update the products status
-        // PATCH endpoint to update the products status
-        app.patch('/products/:id', async (req, res) => {
-            try {
-                const { id } = req.params;
-                const { status } = req.body;
+        if (!updatedProducts.value) {
+          return res.status(404).json({ error: "products not found" });
+        }
 
+        res.json(updatedProducts.value);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
 
-                if (!ObjectId.isValid(id)) {
-                    return res.status(400).json({ error: 'Invalid products ID' });
-                }
+    // GET feedback for a specific products
+    app.get("/products/:id/feedback", async (req, res) => {
+      try {
+        const { id } = req.params;
 
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({ error: "Invalid products ID" });
+        }
 
-                const updatedProducts = await productsCollection.findOneAndUpdate(
-                    { _id: new ObjectId(id) },
-                    { $set: { status } },
-                    { returnOriginal: false }
-                );
-
-
-                if (!updatedProducts.value) {
-                    return res.status(404).json({ error: 'products not found' });
-                }
-
-
-                res.json(updatedProducts.value);
-            } catch (error) {
-                console.error(error);
-                res.status(500).json({ error: 'Internal server error' });
-            }
+        const productsData = await productsCollection.findOne({
+          _id: new ObjectId(id),
         });
 
+        if (!productsData) {
+          return res.status(404).json({ error: "products not found" });
+        }
+
+        const feedback = productsData.feedback || "No feedback available";
+        res.json({ feedback });
+      } catch (error) {
+        console.error("Error retrieving products feedback:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+
+    // update the products feedback
+    app.post("/products/:id/feedback", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { feedback } = req.body;
+        console.log(feedback);
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({ error: "Invalid products ID" });
+        }
+
+        const updatedProducts = await productsCollection.findOneAndUpdate(
+          { _id: new ObjectId(id) },
+          { $set: { feedback } },
+          { returnOriginal: false }
+        );
+
+        if (!updatedProducts.value) {
+          return res.status(404).json({ error: "products not found" });
+        }
+
+        res.json(updatedProducts.value);
+      } catch (error) {
+        console.error("Error handling feedback:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+
+    // <<<<<<<<<<<<------------------Booking Products--------------------->>>>>>>>>>>>>>>>
+
+    // Create a new booking product
+    app.post("/selectedProducts", async (req, res) => {
+      try {
+        const productData = req.body; 
+  
+        const result = await bookingsCollection.insertOne(productData);
+
+        res.send(productData);
+      } catch (error) {
+        console.error("Error creating Product:", error);
+        res.status(500).json({ error: "Server error" });
+      }
+    });
+
+    // get booking products by user mail
+
+    app.get("/selectedProducts/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const query = { bookingEmail: email };
+
+        const selectedProducts = await bookingsCollection.find(query).toArray();
+
+        res.status(200).json(selectedProducts);
+      } catch (error) {
+        console.error("Error fetching selected products:", error);
+        res.status(500).json({ error: "Server error" });
+      }
+    });
+
+    // delete selected products
+
+    app.delete("/selectedProducts/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      try {
+        const result = await bookingsCollection.deleteOne(query);
+        res.json({ message: "Product deleted successfully", result });
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+
+ // <<<<<<<<<<<<------------------payments--------------------->>>>>>>>>>>>>>>>
+
+
+    // // create payment intent
+    // app.post("/create-payment-intent", async (req, res) => {
+    //   const { price } = req.body;
+    //   const amount = parseInt(price * 100);
+    //   const paymentIntent = await stripe.paymentIntents.create({
+    //     amount: amount,
+    //     currency: "usd",
+    //     payment_method_types: ["card"],
+    //   });
+
+    //   res.send({
+    //     clientSecret: paymentIntent.client_secret,
+    //   });
+    // });
+
+    // payment related api
+
+    app.post("/payments", async (req, res) => {
+      const payment = req.body;
+      const insertResult = await paymentCollection.insertOne(payment);
+
+      const query = {
+        _id: { $in: payment.cartItems.map((id) => new ObjectId(id)) },
+      };
+      const deleteResult = await bookingsCollection.deleteMany(query);
+
+      res.send({ insertResult, deleteResult });
+    });
 
 
 
-        // GET endpoint for retrieving feedback for a specific products
-        app.get('/products/:id/feedback', async (req, res) => {
-            try {
-                const { id } = req.params;
 
-
-                if (!ObjectId.isValid(id)) {
-                    return res.status(400).json({ error: 'Invalid products ID' });
-                }
-
-
-                const productsData = await productsCollection.findOne({ _id: new ObjectId(id) });
-
-
-                if (!productsData) {
-                    return res.status(404).json({ error: 'products not found' });
-                }
-
-
-                const feedback = productsData.feedback || 'No feedback available';
-                res.json({ feedback });
-            } catch (error) {
-                console.error('Error retrieving products feedback:', error);
-                res.status(500).json({ error: 'Internal server error' });
-            }
-        });
-
-
-
-
-        // POST endpoint to update the products feedback
-        app.post('/products/:id/feedback', async (req, res) => {
-            try {
-                const { id } = req.params;
-                const { feedback } = req.body;
-                console.log(feedback);
-
-
-                if (!ObjectId.isValid(id)) {
-                    return res.status(400).json({ error: 'Invalid products ID' });
-                }
-
-
-                const updatedProducts = await productsCollection.findOneAndUpdate(
-                    { _id: new ObjectId(id) },
-                    { $set: { feedback } },
-                    { returnOriginal: false }
-                );
-
-
-                if (!updatedProducts.value) {
-                    return res.status(404).json({ error: 'products not found' });
-                }
-
-
-                res.json(updatedProducts.value);
-            } catch (error) {
-                console.error('Error handling feedback:', error);
-                res.status(500).json({ error: 'Internal server error' });
-            }
-        });
-
-
-
+  
     // Send a ping to confirm a successful connection
+
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
   } finally {
-    // Ensures that the client will close when you finish/error
     // await client.close();
   }
 }
